@@ -27,4 +27,28 @@ public class Main {
         TimeUnit.MINUTES.toMillis(minutes) +
         TimeUnit.SECONDS.toMillis(seconds);
   }
+  
+  /*
+   * Interesting scenarios:
+   *  - more threads than pool objects
+   *  - fewer threads than pool objects
+   *  - high allocation failure rate
+   *  - low allocation failure rate
+   *  - deallocation failures
+   *  - threads claiming just one object
+   *  - threads claiming more than one object
+   *  - resizing the pool larger
+   *  - resizing the pool smaller
+   *  - long timeouts
+   *  - short timeouts
+   *  - zero timeouts
+   *  - objects expire fast
+   *  - objects expire slowly
+   *  - expiration throws exception
+   *  - expiration does not throw exception
+   *  - elevated unparks
+   *  - thread count < core count
+   *  - thread count = core count
+   *  - thread count > core count
+   */
 }
