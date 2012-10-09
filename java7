@@ -1,0 +1,11 @@
+
+#
+# NOTE:
+# This script probably only works on OS X.
+# So... help wanted with Linux & BSD ports, thanks! :)
+#
+
+export JAVA_HOME="$(/usr/libexec/java_home -v 1.7)"
+export JAVA="$JAVA_HOME/bin/java"
+
+$JAVA $@

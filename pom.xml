@@ -53,7 +53,7 @@
                   <goal>exec</goal>
                 </goals>
                 <configuration>
-                  <executable>java</executable>
+                  <executable>java7</executable>
                   <arguments>
                     <argument>-server</argument>
                     <argument>-Dhours=${hours}</argument>
