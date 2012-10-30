@@ -67,6 +67,7 @@ public class Planner {
 
   public Plan createPlan(long timeMillis) {
     long minSlotsPossible = timeMillis / minSlotTimeMillis;
+    Plan plan = new Plan();
     System.out.println("min-slots possible: " + minSlotsPossible);
     
     EnumSet<Category> visited = EnumSet.noneOf(Category.class);
@@ -86,7 +87,7 @@ public class Planner {
       }
     }
     
-    return null;
+    return plan;
   }
 
   private List<Situation> filterSituation(Category category) {

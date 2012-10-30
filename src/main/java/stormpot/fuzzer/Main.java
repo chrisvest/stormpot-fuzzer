@@ -11,6 +11,7 @@ public class Main {
   
   public static void main(String[] args) {
     long timeMillis = calculateTimeMills();
+    PoolFactory poolFactory = createPoolFactory();
     
     Config<GenericPoolable> config = new Config<GenericPoolable>();
     FuzzyAllocator allocator = new FuzzyAllocator();
@@ -22,6 +23,7 @@ public class Main {
     System.out.println("Fuzz-Test Execution Plan:");
     System.out.println(plan);
     
+    plan.execute(poolFactory);
   }
 
   private static long calculateTimeMills() {
@@ -29,5 +31,13 @@ public class Main {
         TimeUnit.HOURS.toMillis(hours) +
         TimeUnit.MINUTES.toMillis(minutes) +
         TimeUnit.SECONDS.toMillis(seconds);
+  }
+
+  private static PoolFactory createPoolFactory() {
+    String pfprop = System.getProperty("pool", "blaze");
+    if (pfprop.equals("blaze")) {
+      return new BlazePoolFactory();
+    }
+    throw new IllegalArgumentException("I don't know this pool: " + pfprop);
   }
 }
