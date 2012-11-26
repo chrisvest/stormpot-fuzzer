@@ -24,4 +24,8 @@ public class Plan {
     }
     return sb.toString();
   }
+
+  public void add(PlanStep step) {
+    steps.add(step);
+  }
 }

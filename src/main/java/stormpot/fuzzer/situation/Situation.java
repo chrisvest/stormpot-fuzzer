@@ -24,4 +24,6 @@ public abstract class Situation implements Runnable {
   public boolean hasCategory(Category category) {
     return this.category == category;
   }
+
+  public abstract String toString();
 }

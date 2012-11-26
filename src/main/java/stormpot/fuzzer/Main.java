@@ -38,6 +38,9 @@ public class Main {
     if (pfprop.equals("blaze")) {
       return new BlazePoolFactory();
     }
+    if (pfprop.equals("queue")) {
+      return new QueuePoolFactory();
+    }
     throw new IllegalArgumentException("I don't know this pool: " + pfprop);
   }
 }

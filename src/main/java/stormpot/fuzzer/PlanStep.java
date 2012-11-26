@@ -29,4 +29,8 @@ public class PlanStep {
     }
     sb.append('\n');
   }
+
+  public void add(Situation situation) {
+    situations.add(situation);
+  }
 }

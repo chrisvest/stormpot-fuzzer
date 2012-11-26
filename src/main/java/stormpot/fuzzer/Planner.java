@@ -14,6 +14,10 @@ public class Planner {
 
   private final FuzzyAllocator allocator;
   private final List<Situation> situations;
+
+  private int coreCount;
+
+  private int maxThreadCount;
   
   /*
    * Interesting scenarios:
@@ -46,9 +50,10 @@ public class Planner {
     this.allocator = allocator;
     this.situations = new  ArrayList<>();
     
-    int coreCount = Runtime.getRuntime().availableProcessors();
+    coreCount = Runtime.getRuntime().availableProcessors();
+    maxThreadCount = coreCount * 4 + 1;
     
-    add(99, new SetThreadCount(coreCount * 4 + 1), threadCount, passive);
+    add(99, new SetThreadCount(maxThreadCount), threadCount, passive);
     add(50, new SetThreadCount(coreCount), threadCount, passive);
     add(50, new SetThreadCount(Math.max(coreCount / 2, 1)), threadCount, passive);
 
@@ -70,30 +75,48 @@ public class Planner {
     Plan plan = new Plan();
     System.out.println("min-slots possible: " + minSlotsPossible);
     
-    EnumSet<Category> visited = EnumSet.noneOf(Category.class);
-    for (Category a : Category.values()) {
-      visited.add(a);
-      for (Category b : Category.values()) {
-        if (visited.contains(b)) {
-          continue;
-        }
-        List<Situation> as = filterSituation(a);
-        List<Situation> bs = filterSituation(b);
-        for (Situation ax : as) {
-          for (Situation bx : bs) {
-            
-          }
-        }
-      }
+    /*
+     * all possible sets
+     * remove ones with conflicting exclusives
+     * remove ones with more active modes than threads
+     */
+    
+    for (int threads = maxThreadCount; threads > 0; threads--) {
+      generatePlanPermutations(plan, threads);
     }
     
+//    EnumSet<Category> visited = EnumSet.noneOf(Category.class);
+//    for (Category a : Category.values()) {
+//      visited.add(a);
+//      for (Category b : Category.values()) {
+//        if (visited.contains(b)) {
+//          continue;
+//        }
+//        List<Situation> as = filterSituation(a);
+//        List<Situation> bs = filterSituation(b);
+//        for (Situation ax : as) {
+//          PlanStep step = new PlanStep(minSlotsPossible);
+//          step.add(ax);
+//          for (Situation bx : bs) {
+//            step.add(bx);
+//          }
+//          plan.add(step);
+//        }
+//      }
+//    }
+    
     return plan;
+  }
+
+  private void generatePlanPermutations(Plan plan, int threads) {
+    // TODO Auto-generated method stub
+    
   }
 
   private List<Situation> filterSituation(Category category) {
     List<Situation> list = new ArrayList<>();
     for (Situation situation : situations) {
-      if (situation.hasCategory(category)) {
+      if (!situation.hasCategory(category)) {
         list.add(situation);
       }
     }

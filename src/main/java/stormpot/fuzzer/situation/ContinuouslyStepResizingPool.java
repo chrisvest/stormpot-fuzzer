@@ -2,10 +2,16 @@ package stormpot.fuzzer.situation;
 
 public class ContinuouslyStepResizingPool extends Situation {
 
+  private final int increment;
+
   public ContinuouslyStepResizingPool(int increment) {
-    // TODO Auto-generated constructor stub
+    this.increment = increment;
   }
 
+  @Override
+  public String toString() {
+    return "ContinuouslyStepResizingPool(" + increment + ")";
+  }
 }
 
 
