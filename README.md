@@ -3,7 +3,7 @@ stormpot-fuzzer
 
 Fuzz- and stress-testing program for Stormpot.
 
-Run the fuzzer by simply typing the command `mvn` on a command line
+Run the fuzzer by simply typing the command `mvn -Pfuzz` on a command line
 in this directory, with some additional parameters for specifying for how
 long the fuzzer should run:
 
