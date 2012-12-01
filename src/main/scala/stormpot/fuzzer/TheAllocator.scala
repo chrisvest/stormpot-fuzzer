@@ -2,7 +2,9 @@ package stormpot.fuzzer
 
 import stormpot._
 
-class TheAllocator extends Allocator[ThePoolable] {
-  def allocate(slot : Slot): ThePoolable = new ThePoolable(slot)
-  def deallocate(obj : ThePoolable): Unit = ()
+class TheAllocator extends Allocator[Poolable] {
+  def allocate(slot : Slot) = new Poolable {
+    def release() = slot.release(this)
+  }
+  def deallocate(obj : Poolable) = ()
 }

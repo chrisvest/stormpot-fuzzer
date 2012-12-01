@@ -1,13 +1,13 @@
 package stormpot.fuzzer
 
 import stormpot._
-
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.AtomicInteger
 import collection.Iterator
+import scala.collection.mutable.ArrayStack
 
 class Fuzzer(
-    val config: Config[ThePoolable],
+    val config: Config[Poolable],
     var absoluteThreadCount: Int = -1,
     var relativeThreadFactor: Double = -1.0,
     var poolSize: Int = 10,
@@ -15,7 +15,38 @@ class Fuzzer(
     var workList: List[() => Unit] = List()) {
   
   val longTimeout = new Timeout(1, TimeUnit.SECONDS)
-  var pool: LifecycledPool[ThePoolable] = null;
+  val serviceThreads = new ArrayStack[Runnable]
+  var pool: PoolType = null;
+  
+  def withService[X](
+      interval: Long,
+      init: X,
+      step: (X => Unit),
+      inc: (X => X)): Unit = {
+    serviceThreads += new Runnable {
+      def run() {
+        var x = init
+        while (sleep()) {
+          step(x)
+          x = inc(x)
+        }
+      }
+      
+      def sleep() = {
+        try {
+          Thread.sleep(interval)
+          true
+        } catch {
+        case e => false
+        }
+      }
+    }
+  }
+  
+  def setTargetSize(size: Int) {
+    println("setting runtime target size to " + size)
+    pool.setTargetSize(size)
+  }
   
   def fuzz(poolFactory: PoolFactory) {
     config.setSize(poolSize)

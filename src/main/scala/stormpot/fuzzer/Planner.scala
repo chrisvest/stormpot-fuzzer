@@ -4,17 +4,22 @@ import stormpot._
 import scala.collection.mutable.ArrayStack
 
 object Planner {
-  abstract class Conflictivity
+  sealed abstract class Conflictivity
   case object Contention extends Conflictivity
   case object Size extends Conflictivity
   case object Meshing extends Conflictivity
   
-  case class Action(conflictivity: Conflictivity, effect: Fuzzer => Unit)
+  case class Action(
+      name: String,
+      conflictivity: Conflictivity,
+      effect: Fuzzer => Unit)
   
-  case class Part(actions: Seq[Action]) {
-    def configure(fuzzer: Fuzzer): Unit = {
+  class Part(actions: Seq[Action]) {
+    def configure(fuzzer: Fuzzer) {
       actions.foreach(_.effect(fuzzer))
     }
+    
+    override def toString() = actions.map(_.name).mkString("Part(", "; ", ")")
   }
   
   class Plan(parts: Seq[Part], timePerPart: Long, factory: PoolFactory) {
@@ -28,6 +33,8 @@ object Planner {
         print('.')
       }
     }
+    
+    override def toString() = parts.mkString("Plan [\n  ", "\n  ", "\n]")
   }
   
   val minimumPartTime = 500 // milliseconds
@@ -64,17 +71,24 @@ object Planner {
   
   val actions = List(
 //      Action(Contention, _.absoluteThreadCount = mediumContention),
-      Action(Contention, _.absoluteThreadCount = highContention),
+      Action("High contention", Contention, _.absoluteThreadCount = highContention),
 //      Action(Contention, _.absoluteThreadCount = lowContention),
 //      Action(Contention, _.relativeThreadFactor = 1.0),
 //      Action(Contention, _.relativeThreadFactor = 1.2),
 //      Action(Contention, _.relativeThreadFactor = 0.8),
       
-      Action(Size, _.poolSize = 1),
-      Action(Size, _.poolSize = 2),
-      Action(Size, _.poolSize = 10),
-      Action(Size, _.poolSize = 100)
+      Action("Pool size 1", Size, _.poolSize = 1),
+      Action("Pool size 2", Size, _.poolSize = 2),
+      Action("Pool size 10", Size, _.poolSize = 10),
+      Action("Pool size 100", Size, _.poolSize = 100),
+      
+      Action("Continuously adjusting pool size up to 10", Size,
+          (f:Fuzzer) => f.withService(2, 5, f.setTargetSize(_:Int), incBound(10)))
   )
+  
+  def incBound(top:Int) = {
+    x:Int => 1 + ((1 + x) % top)
+  }
   
   def plan(time: Long, poolFactory: PoolFactory): Plan = {
     // group conflicting elements together
@@ -83,8 +97,9 @@ object Planner {
     val actionGroups = actions.groupBy(_.conflictivity)
     val meshingActions = actionGroups.get(Meshing)
     val conflictingActions = (actionGroups - Meshing).values
+    val actionCombos = combinationsOf(conflictingActions.toList).toList
     
-    var plan = combinationsOf(conflictingActions.toList).map(p => new Part(p))
+    var plan = actionCombos.map(x => new Part(x))
     var partTime = 500L
     val partsPossible = (time / partTime).toInt
     
@@ -111,5 +126,13 @@ object Planner {
       actions.foreach(action => res.push(action :: path))
     case actions :: more =>
       actions.foreach(action => combineInto(more, action :: path, res))
+  }
+  
+  def main(args: Array[String]) {
+    val groups = actions.groupBy(_.conflictivity)
+    val combos = combinationsOf(groups.values.toList)
+    println(combos.count(_ == null) + " nulls to begin with")
+    val parts = combos.map(new Part(_))
+    println(parts.count(_ == null) + " nulls found after mapping")
   }
 }

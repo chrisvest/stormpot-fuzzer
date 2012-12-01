@@ -15,6 +15,7 @@ object Main {
     printf("Fuzz-testing pool for %s millis: %s%n", time, poolName)
     
     val plan = Planner.plan(time, poolFactory)
+    println(plan)
     plan.execute()
     
     println("\nDone")

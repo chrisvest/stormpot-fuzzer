@@ -3,5 +3,6 @@ package stormpot
 import stormpot._
 
 package object fuzzer {
-  type PoolFactory = (Config[ThePoolable] => LifecycledPool[ThePoolable])
+  type PoolType = LifecycledPool[Poolable] with ResizablePool[Poolable]
+  type PoolFactory = (Config[Poolable] => PoolType)
 }
