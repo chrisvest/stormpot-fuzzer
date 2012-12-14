@@ -5,14 +5,15 @@ import scala.collection.mutable.ArrayStack
 
 object Planner {
   sealed abstract class Conflictivity
-  case object Contention extends Conflictivity
+  case class Contention(level:Int) extends Conflictivity
   case object Size extends Conflictivity
   case object Meshing extends Conflictivity
   
   case class Action(
       name: String,
       conflictivity: Conflictivity,
-      effect: Fuzzer => Unit)
+      effect: Fuzzer => Unit,
+      installsThread: Boolean)
   
   class Part(actions: Seq[Action]) {
     def configure(fuzzer: Fuzzer) {
@@ -41,6 +42,11 @@ object Planner {
   val mediumContention = Runtime.getRuntime().availableProcessors()
   val highContention = mediumContention * 4 + 1
   val lowContention = math.max(mediumContention / 2, 1)
+  object ContentionLevel {
+    val medium = new Contention(mediumContention)
+    val high = new Contention(highContention)
+    val low = new Contention(lowContention)
+  }
   
   /*
    * Interesting scenarios:
@@ -69,21 +75,25 @@ object Planner {
    *  - expiration does not throw exception
    */
   
+  def contention(name: String, level: Int) =
+    Action(name, Contention(level), _.absoluteThreadCount = level, false)
+  def poolSize(size: Int) =
+    Action("Pool size " + size, Size, _.poolSize = size, false)
+  
   val actions = List(
-//      Action(Contention, _.absoluteThreadCount = mediumContention),
-      Action("High contention", Contention, _.absoluteThreadCount = highContention),
-//      Action(Contention, _.absoluteThreadCount = lowContention),
+      contention("Medium contention", mediumContention),
+      contention("High contention", highContention),
 //      Action(Contention, _.relativeThreadFactor = 1.0),
 //      Action(Contention, _.relativeThreadFactor = 1.2),
 //      Action(Contention, _.relativeThreadFactor = 0.8),
       
-      Action("Pool size 1", Size, _.poolSize = 1),
-      Action("Pool size 2", Size, _.poolSize = 2),
-      Action("Pool size 10", Size, _.poolSize = 10),
-      Action("Pool size 100", Size, _.poolSize = 100),
+      poolSize(1),
+      poolSize(2),
+      poolSize(10),
+      poolSize(100),
       
       Action("Continuously adjusting pool size up to 10", Size,
-          (f:Fuzzer) => f.withService(2, 5, f.setTargetSize(_:Int), incBound(10)))
+          (f:Fuzzer) => f.withService(2, 5, f.setTargetSize(_:Int), incBound(10)), false)
   )
   
   def incBound(top:Int) = {
@@ -95,9 +105,10 @@ object Planner {
     // iterate combinations of actions from each group
     // fill with combinations of non-conflicting actions
     val actionGroups = actions.groupBy(_.conflictivity)
-    val meshingActions = actionGroups.get(Meshing)
+    val meshingActions = actionGroups.getOrElse(Meshing, List())
     val conflictingActions = (actionGroups - Meshing).values
-    val actionCombos = combinationsOf(conflictingActions.toList).toList
+    val actionCombosBase = combinationsOf(conflictingActions.toList).toList
+    val actionCombos = meshCombos(actionCombosBase, meshingActions)
     
     var plan = actionCombos.map(x => new Part(x))
     var partTime = 500L
@@ -128,11 +139,17 @@ object Planner {
       actions.foreach(action => combineInto(more, action :: path, res))
   }
   
-  def main(args: Array[String]) {
-    val groups = actions.groupBy(_.conflictivity)
-    val combos = combinationsOf(groups.values.toList)
-    println(combos.count(_ == null) + " nulls to begin with")
-    val parts = combos.map(new Part(_))
-    println(parts.count(_ == null) + " nulls found after mapping")
+  def meshCombos(base: List[Seq[Action]], mesh: List[Action]): List[List[Action]] = {
+//    base.flatMap(baseline => {
+//      val openThreadSlots = baseline.foldLeft(0)(pickContention)
+//      val takenThreadSlots = baseline.count(_.installsThread)
+////      mesh.
+//    })
+    null
+  }
+  
+  def pickContention(default: Int, x: Action) = x.conflictivity match {
+    case Contention(level) => level
+    case _ => default
   }
 }
