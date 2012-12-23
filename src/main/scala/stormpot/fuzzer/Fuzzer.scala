@@ -3,20 +3,23 @@ package stormpot.fuzzer
 import stormpot._
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.locks.LockSupport
 import collection.Iterator
 import scala.collection.mutable.ArrayStack
 
 class Fuzzer(
     val config: Config[Poolable],
+    var poolFactory: PoolFactory = null,
     var absoluteThreadCount: Int = -1,
     var relativeThreadFactor: Double = -1.0,
     var poolSize: Int = 10,
     var fuzzTime: Long = 500,
+    var alloc: TheAllocator = new TheAllocator(),
     var workList: List[() => Unit] = List()) {
   
-  val longTimeout = new Timeout(1, TimeUnit.SECONDS)
   val serviceThreads = new ArrayStack[Runnable]
   var pool: PoolType = null;
+  @volatile var workers: Option[List[Thread]] = None
   
   def withService[X](
       interval: Long,
@@ -43,13 +46,52 @@ class Fuzzer(
     }
   }
   
+  def everyMs(interval: Long, act: Fuzzer => Unit) {
+    withService(interval, this, act, identity: (Fuzzer => Fuzzer))
+  }
+  
+  def unparkThreads() {
+    workers.foreach(_.foreach(LockSupport.unpark))
+  }
+  
+  def doClaims(claims: Int, timeout: Timeout) {
+    val deadline = timeout.getDeadline()
+    val obj = pool.claim(timeout)
+    val excessTime = timeout.getTimeLeft(deadline)
+    if (obj == null && excessTime > 0) {
+      val unit = timeout.getBaseUnit()
+      val msg = "claimed 'null' with " + excessTime + " " + unit + " left."
+      throw new IllegalStateException(msg)
+    }
+    try {
+      if (claims > 0) {
+        doClaims(claims - 1, timeout)
+      }
+    } finally {
+      if (obj != null) {
+        obj.release()
+      }
+    }
+  }
+  
+  def claimRelease(count: Int, timeout: Timeout) {
+    val f = () => {
+      doClaims(count, timeout)
+    }
+    workList = f :: workList
+  }
+  
+  def allocationFailureRate(rate: Double) {
+    alloc.setFailureRate(rate)
+  }
+  
   def setTargetSize(size: Int) {
-    println("setting runtime target size to " + size)
     pool.setTargetSize(size)
   }
   
-  def fuzz(poolFactory: PoolFactory) {
+  def fuzz() {
     config.setSize(poolSize)
+    config.setAllocator(alloc)
     pool = poolFactory(config)
     
     val relativeThreadCount = (poolSize * relativeThreadFactor)
@@ -63,14 +105,14 @@ class Fuzzer(
     workers.foreach(_.interrupt())
     workers.foreach(_.join())
     
-    if (!pool.shutdown().await(longTimeout)) {
+    if (!pool.shutdown().await(new Timeout(1, TimeUnit.SECONDS))) {
       throw new IllegalStateException("Pool did not shut down!")
     }
+    workList = List()
+    alloc.setFailureRate(0.0)
   }
   
   def buildWorkers(latch: CountDownLatch, threadCount: Int): List[Thread] = {
-    val defaultWorkList = Iterator.continually(defaultWork())
-    workList = workList ++ defaultWorkList.take(threadCount - workList.length)
     val workers = workList.map(worker(latch, _))
     workers
   }
@@ -90,16 +132,16 @@ class Fuzzer(
       def doWork() {
         while (!Thread.currentThread().isInterrupted()) {
           for (_ <- 1 to 100) {
-            work()
+            try {
+              work()
+            } catch {
+              case e: PoolException => if (e.getCause() != TheAllocator.expectableException)
+                throw e
+            }
           }
         }
       }
     }
     new Thread(script, "Worker-" + workerCounter.incrementAndGet())
-  }
-  
-  def defaultWork(): (() => Unit) = () => {
-    val obj = pool.claim(longTimeout)
-    obj.release()
   }
 }

@@ -2,20 +2,20 @@ package stormpot.fuzzer
 
 import stormpot._
 import scala.collection.mutable.ArrayStack
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.TimeUnit
 
 object Planner {
-  sealed abstract class Conflictivity
-  case class Contention(level:Int) extends Conflictivity
-  case object Size extends Conflictivity
-  case object Meshing extends Conflictivity
+  private val actionCounter = new AtomicInteger()
   
   case class Action(
       name: String,
-      conflictivity: Conflictivity,
       effect: Fuzzer => Unit,
-      installsThread: Boolean)
+      installsThread: Boolean,
+      requireObjs: Int,
+      id: Int = actionCounter.incrementAndGet())
   
-  class Part(actions: Seq[Action]) {
+  case class Part(actions: Seq[Action]) {
     def configure(fuzzer: Fuzzer) {
       actions.foreach(_.effect(fuzzer))
     }
@@ -23,41 +23,37 @@ object Planner {
     override def toString() = actions.map(_.name).mkString("Part(", "; ", ")")
   }
   
-  class Plan(parts: Seq[Part], timePerPart: Long, factory: PoolFactory) {
-    def execute(): Unit = {
+  case class Phase(threads: Int, poolSize: Int, parts: Seq[Part]) {
+    def run(fuzzer: Fuzzer) {
+      fuzzer.absoluteThreadCount = threads
+      fuzzer.poolSize = poolSize
       for (part <- parts) {
-        val alloc = new TheAllocator()
-        val fuzzer = new Fuzzer(new Config().setAllocator(alloc))
-        fuzzer.fuzzTime = timePerPart
+        printf("Fuzzing %s threads, %s objs: %s\n", threads, poolSize, part)
         part.configure(fuzzer)
-        fuzzer.fuzz(factory)
-        print('.')
+        fuzzer.fuzz()
       }
     }
     
-    override def toString() = parts.mkString("Plan [\n  ", "\n  ", "\n]")
+    override def toString() = parts.mkString(
+        "  Phase " + threads + " threads, " + poolSize + " items [\n    ",
+        ",\n    ", "]")
   }
   
-  val minimumPartTime = 500 // milliseconds
-  val mediumContention = Runtime.getRuntime().availableProcessors()
-  val highContention = mediumContention * 4 + 1
-  val lowContention = math.max(mediumContention / 2, 1)
-  object ContentionLevel {
-    val medium = new Contention(mediumContention)
-    val high = new Contention(highContention)
-    val low = new Contention(lowContention)
+  class Plan(phases: Seq[Phase], timePerPart: Long, factory: PoolFactory) {
+    def execute(): Unit = {
+      for (phase <- phases) {
+        val fuzzer = new Fuzzer(new Config())
+        fuzzer.fuzzTime = timePerPart
+        fuzzer.poolFactory = factory
+        phase.run(fuzzer)
+      }
+    }
+    
+    override def toString() = phases.mkString("Plan [\n", "\n", "\n]")
   }
   
   /*
    * Interesting scenarios:
-   *  - thread count > core count
-   *  - thread count = core count
-   *  - thread count < core count
-   *  
-   *  - more threads than pool objects
-   *  - fewer threads than pool objects
-   *  - resizing the pool larger
-   *  - resizing the pool smaller
    *  
    *  - elevated unparks
    *  - threads claiming just one object
@@ -75,81 +71,68 @@ object Planner {
    *  - expiration does not throw exception
    */
   
-  def contention(name: String, level: Int) =
-    Action(name, Contention(level), _.absoluteThreadCount = level, false)
-  def poolSize(size: Int) =
-    Action("Pool size " + size, Size, _.poolSize = size, false)
-  
+  val longTimeout = new Timeout(1, TimeUnit.SECONDS)
+  val shortTimeout = new Timeout(1, TimeUnit.MILLISECONDS)
+  val zeroTimeout = new Timeout(0, TimeUnit.MILLISECONDS)
+  val fillAction = Action("C1", _.claimRelease(1, longTimeout), true, 1)
   val actions = List(
-      contention("Medium contention", mediumContention),
-      contention("High contention", highContention),
-//      Action(Contention, _.relativeThreadFactor = 1.0),
-//      Action(Contention, _.relativeThreadFactor = 1.2),
-//      Action(Contention, _.relativeThreadFactor = 0.8),
-      
-      poolSize(1),
-      poolSize(2),
-      poolSize(10),
-      poolSize(100),
-      
-      Action("Continuously adjusting pool size up to 10", Size,
-          (f:Fuzzer) => f.withService(2, 5, f.setTargetSize(_:Int), incBound(10)), false)
+      fillAction,
+      Action("C2", _.claimRelease(2, longTimeout), true, 2),
+      Action("C3", _.claimRelease(3, longTimeout), true, 3),
+      Action("C1 w/ short timeout", _.claimRelease(1, shortTimeout), true, 1),
+      Action("C1 w/ zero timeout", _.claimRelease(1, zeroTimeout), true, 1),
+      Action("elevated unparks", f => f.everyMs(1, _.unparkThreads), false, 0),
+      Action("elevated allocation failures", _.allocationFailureRate(0.5), false, 0)
   )
   
-  def incBound(top:Int) = {
-    x:Int => 1 + ((1 + x) % top)
-  }
-  
   def plan(time: Long, poolFactory: PoolFactory): Plan = {
-    // group conflicting elements together
-    // iterate combinations of actions from each group
-    // fill with combinations of non-conflicting actions
-    val actionGroups = actions.groupBy(_.conflictivity)
-    val meshingActions = actionGroups.getOrElse(Meshing, List())
-    val conflictingActions = (actionGroups - Meshing).values
-    val actionCombosBase = combinationsOf(conflictingActions.toList).toList
-    val actionCombos = meshCombos(actionCombosBase, meshingActions)
     
-    var plan = actionCombos.map(x => new Part(x))
+    val cpus = Runtime.getRuntime().availableProcessors()
+    val contentions = List(cpus * 4 + 1, cpus, math.max(cpus / 2, 1))
+    val poolSizes = List(20, 8, 2, 1)
+    
+    var phases = for (threads <- contentions;
+                      size <- Set(threads + 10, threads, 2, 1))
+      yield Phase(threads, size, planWindow(threads, size))
+    
     var partTime = 500L
     val partsPossible = (time / partTime).toInt
+    val partSum = phases.foldLeft(0)(_ + _.parts.size)
     
-    if (partsPossible > plan.length) {
-      partTime = time / plan.length
+    if (partsPossible > partSum) {
+      partTime = time / partSum
     } else {
-      plan = plan.take(partsPossible)
+      phases = takeLimitParts(phases, partsPossible)
     }
     
-    new Plan(plan, partTime, poolFactory)
+    new Plan(phases, partTime, poolFactory)
   }
   
-  def combinationsOf(xs: Iterable[List[Action]]): Seq[Seq[Action]] = {
-    val output = ArrayStack[List[Action]]()
-    combineInto(xs, List(), output)
-    output
+  def takeLimitParts(phases: List[Phase], limit: Int): List[Phase] = {
+    val head = phases.head
+    val headSize = head.parts.size
+    if (headSize < limit) head :: takeLimitParts(phases.tail, limit - headSize)
+    else List(Phase(head.threads, head.poolSize, head.parts.take(limit)))
   }
   
-  def combineInto(
-      xs: Iterable[List[Action]],
-      path: List[Action],
-      res: ArrayStack[List[Action]]): Unit = xs match {
-    case actions :: Nil =>
-      actions.foreach(action => res.push(action :: path))
-    case actions :: more =>
-      actions.foreach(action => combineInto(more, action :: path, res))
+  def planWindow(threads: Int, size: Int): Seq[Part] = {
+    val baseActions = actions.filter(_.requireObjs <= size)
+    val actives = baseActions.filter(_.installsThread)
+    val passives = baseActions.filterNot(_.installsThread)
+    val parts = for (activeLimit <- 1 to threads;
+                     activeActs <- actives.combinations(activeLimit);
+                     passiveLimit <- 0 to passives.size;
+                     passiveActs <- passives.combinations(passiveLimit))
+      yield new Part(actSet(activeActs, passiveActs, threads - activeLimit))
+    parts.distinct.sortBy(1 - _.actions.size)
   }
   
-  def meshCombos(base: List[Seq[Action]], mesh: List[Action]): List[List[Action]] = {
-//    base.flatMap(baseline => {
-//      val openThreadSlots = baseline.foldLeft(0)(pickContention)
-//      val takenThreadSlots = baseline.count(_.installsThread)
-////      mesh.
-//    })
-    null
+  def actSet(active: List[Action], passive: List[Action], fill: Int): Seq[Action] = {
+    val acts = active ++ passive ++ Stream.continually(fillAction).take(fill)
+    acts.sortBy(_.id)
   }
   
-  def pickContention(default: Int, x: Action) = x.conflictivity match {
-    case Contention(level) => level
-    case _ => default
+  def main(args: Array[String]) {
+    planWindow(3, 10).foreach(println(_))
   }
 }
