@@ -58,13 +58,13 @@ object Planner {
    *  - elevated unparks
    *  - threads claiming just one object
    *  - threads claiming more than one object
-   *  
    *  - high allocation failure rate
    *  - low allocation failure rate
-   *  - deallocation failures
    *  - long timeouts
    *  - short timeouts
    *  - zero timeouts
+   *  - deallocation failures
+   *  
    *  - objects expire fast
    *  - objects expire slowly
    *  - expiration throws exception
@@ -74,19 +74,27 @@ object Planner {
   val longTimeout = new Timeout(1, TimeUnit.SECONDS)
   val shortTimeout = new Timeout(1, TimeUnit.MILLISECONDS)
   val zeroTimeout = new Timeout(0, TimeUnit.MILLISECONDS)
+  
   val fillAction = Action("C1", _.claimRelease(1, longTimeout), true, 1)
   val actions = List(
       fillAction,
       Action("C2", _.claimRelease(2, longTimeout), true, 2),
       Action("C3", _.claimRelease(3, longTimeout), true, 3),
-      Action("C1 w/ short timeout", _.claimRelease(1, shortTimeout), true, 1),
-      Action("C1 w/ zero timeout", _.claimRelease(1, zeroTimeout), true, 1),
-      Action("elevated unparks", f => f.everyMs(1, _.unparkThreads), false, 0),
-      Action("elevated allocation failures", _.allocationFailureRate(0.5), false, 0)
+      Action("C1-1-timeout", _.claimRelease(1, shortTimeout), true, 1),
+      Action("C1-0-timeout", _.claimRelease(1, zeroTimeout), true, 1),
+      Action("C2", _.claimRelease(2, longTimeout), true, 2),
+      Action("C3", _.claimRelease(3, longTimeout), true, 3),
+      Action("C1-1-timeout", _.claimRelease(1, shortTimeout), true, 1),
+      Action("C1-0-timeout", _.claimRelease(1, zeroTimeout), true, 1),
+      Action("Unparky", f => f.everyMs(1, _.unparkThreads), false, 0),
+      Action("AllocErr", _.allocationFailureRate(0.5), false, 0),
+      Action("DeallocErr", _.deallocationFailureRate(0.5), false, 0),
+      Action("GrowyPool",
+          f => f.countEveryMs(1, (x:Int) => f.setTargetSize(1+(x % f.poolSize-1))),
+          false, 0)
   )
   
   def plan(time: Long, poolFactory: PoolFactory): Plan = {
-    
     val cpus = Runtime.getRuntime().availableProcessors()
     val contentions = List(cpus * 4 + 1, cpus, math.max(cpus / 2, 1))
     val poolSizes = List(20, 8, 2, 1)
@@ -130,9 +138,5 @@ object Planner {
   def actSet(active: List[Action], passive: List[Action], fill: Int): Seq[Action] = {
     val acts = active ++ passive ++ Stream.continually(fillAction).take(fill)
     acts.sortBy(_.id)
-  }
-  
-  def main(args: Array[String]) {
-    planWindow(3, 10).foreach(println(_))
   }
 }

@@ -137,6 +137,9 @@
   <profiles>
     <profile>
       <id>fuzz</id>
+      <properties>
+        <pool>blaze</pool>
+      </properties>
       <build>
         <defaultGoal>test</defaultGoal>
         <plugins>
@@ -157,6 +160,7 @@
                     <argument>-Dhours=${hours}</argument>
                     <argument>-Dminutes=${minutes}</argument>
                     <argument>-Dseconds=${seconds}</argument>
+                    <argument>-Dpool=${pool}</argument>
                     <argument>-classpath</argument>
                     <classpath />
                     <argument>stormpot.fuzzer.Main</argument>

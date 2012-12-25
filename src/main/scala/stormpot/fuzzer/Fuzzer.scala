@@ -50,6 +50,10 @@ class Fuzzer(
     withService(interval, this, act, identity: (Fuzzer => Fuzzer))
   }
   
+  def countEveryMs(interval: Long, act: Int => Unit) {
+    withService(interval, 1, act, (n: Int) => n+1)
+  }
+  
   def unparkThreads() {
     workers.foreach(_.foreach(LockSupport.unpark))
   }
@@ -82,7 +86,11 @@ class Fuzzer(
   }
   
   def allocationFailureRate(rate: Double) {
-    alloc.setFailureRate(rate)
+    alloc.setAllocationFailureRate(rate)
+  }
+  
+  def deallocationFailureRate(rate: Double) {
+    alloc.setDeallocationFailureRate(rate)
   }
   
   def setTargetSize(size: Int) {
@@ -105,11 +113,14 @@ class Fuzzer(
     workers.foreach(_.interrupt())
     workers.foreach(_.join())
     
-    if (!pool.shutdown().await(new Timeout(1, TimeUnit.SECONDS))) {
+    if (!pool.shutdown().await(new Timeout(10, TimeUnit.SECONDS))) {
       throw new IllegalStateException("Pool did not shut down!")
     }
+    
+    alloc.validateAllocations()
+    
     workList = List()
-    alloc.setFailureRate(0.0)
+    alloc.reset()
   }
   
   def buildWorkers(latch: CountDownLatch, threadCount: Int): List[Thread] = {
@@ -136,7 +147,7 @@ class Fuzzer(
               work()
             } catch {
               case e: PoolException => if (e.getCause() != TheAllocator.expectableException)
-                throw e
+                errorT(e)
             }
           }
         }
